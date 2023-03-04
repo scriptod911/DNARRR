@@ -1,51 +1,59 @@
-import sys
-from Bio import SeqIO
-from Bio.PDB import PDBList, PDBParser, MMCIFParser, Selection, NeighborSearch
-from Bio.PDB.DSSP import DSSP
-from Bio.PDB.MMCIF2Dict import MMCIF2Dict
-from Bio.PDB.Polypeptide import PPBuilder
-import numpy as np
+"""
+UNDER CONSTRUCTION
+
+from Bio import pairwise2
+from Bio.SubsMat import MatrixInfo as matlist
+from Bio.PDB import *
+import warnings
+
 
 def homology_protein_structure(protein_sequence):
-    # Download a PDB file that matches the protein sequence
+    # Define the name of the template protein (in this case, 4hhb)
+    template_name = "4hhb"
+
+    # Initialize the PDBList object and suppress warnings
     pdb_list = PDBList()
-    pdb_ids = pdb_list.search_for_sequence(protein_sequence)
-    pdb_id = pdb_ids[0] if pdb_ids else None
-    if not pdb_id:
-        raise ValueError("No PDB file found for protein sequence")
+    warnings.filterwarnings("ignore")
 
-    pdb_path = pdb_list.retrieve_pdb_file(pdb_id, pdir=".", file_format="pdb")
+    # Download the PDB file for the template protein
+    pdb_list.retrieve_pdb_file(template_name, pdir=".", file_format="pdb")
 
-    # Parse the PDB file
-    parser = MMCIFParser()
-    structure = parser.get_structure(pdb_id, pdb_path)
+    # Parse the PDB file for the template protein
+    parser = PDBParser()
+    structure = parser.get_structure(template_name, template_name + ".pdb")
 
-    # Get the polypeptide chain and build the protein structure
-    model = structure[0]
-    chain = Selection.unfold_entities(model, "C")[0]
-    residues = Selection.unfold_entities(chain, "R")
-    ppb = PPBuilder()
-    polypeptides = ppb.build_peptides(chain)
-    protein_structure = polypeptides[0].get_structure()
+    # Get the amino acid sequence for the template protein
+    template_sequence = ""
+    for chain in structure[0]:
+        for residue in chain:
+            if is_aa(residue.get_resname(), standard=True):
+                template_sequence += three_to_one(residue.get_resname())
+    print("Template sequence:", template_sequence)
 
-    # Generate predicted protein structure by randomly placing atoms based on phi, psi, and omega angles
-    for residue in residues:
-        pp = polypeptides[0]
-        phi, psi = pp[pp.get_residues().index(residue) - 1].phi_psi[1]
-        omega = pp[pp.get_residues().index(residue) - 1].omega
-        residue["N"].set_coord(np.array([0.0, 1.33, 0.0]))
-        residue["CA"].set_coord(np.array([1.46 * np.sin(np.deg2rad(psi)), 0.0, 1.46 * np.cos(np.deg2rad(psi))]))
-        residue["C"].set_coord(np.array([-1.46 * np.sin(np.deg2rad(phi)), 0.0, 0.0]))
-        residue["O"].set_coord(np.array([1.23 * np.sin(np.deg2rad(omega)), 1.23 * np.cos(np.deg2rad(omega)), 0.0]))
+    # Align the protein sequence and the template sequence using Needleman-Wunsch algorithm
+    alignments = pairwise2.align.globaldx(protein_sequence, template_sequence,
+                                           matlist.blosum62, score_only=False)
 
-    # Calculate secondary structure using DSSP algorithm
-    dssp = DSSP(protein_structure[0], pdb_path)
-    secondary_structure = dssp.secondary_structure
+    # Extract the best alignment
+    best_alignment = alignments[0]
+    protein_aligned = best_alignment.seqA
+    template_aligned = best_alignment.seqB
 
-    # Format the protein structure in PDB file format
-    mmcif_dict = MMCIF2Dict(pdb_path)
-    mmcif_dict["_atom_site.group_PDB"] = ["ATOM"] * len(residues) * 4
-    mmcif_dict["_atom_site.type_symbol"] = ["N", "CA", "C", "O"] * len(residues)
-    mmcif_dict["_atom_site.label_atom_id"] = ["N", "CA", "C", "O"] * len(residues)
-    mmcif_dict["_atom_site.label_comp_id"] = [r.get_resname() for r in residues] * 4
-    mmcif_dict["_atom_site.label_asym_id"] = [chain.get_id()] * len(residues) * 4
+    print("Alignment:\n" + protein_aligned + "\n" + template_aligned)
+
+    # Use the template structure as a starting point for homology modeling
+    mdl = complete_pdb(structure)
+
+    # Map the aligned protein sequence onto the template structure
+    ppb = CaPPBuilder()
+    for i, residue in enumerate(ppb.build_peptides(structure)):
+        for atom in residue:
+            atom.set_coord(mdl[0][i].get_coord())
+
+    # Save the modeled structure to a PDB file
+    io = PDBIO()
+    io.set_structure(structure)
+    io.save("modeled_structure.pdb")
+
+    return structure
+"""
